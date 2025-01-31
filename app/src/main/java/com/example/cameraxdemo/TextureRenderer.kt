@@ -162,19 +162,71 @@ class TextureRender {
         } else {
             mTexOffsetHandle = GLES30.glGetUniformLocation(mProgram, "uTexOffset")
             mColorOffsetHandle = GLES30.glGetUniformLocation(mProgram, "uColorOffset")
+//            setKernel(
+//                floatArrayOf(
+//                    -1f,
+//                    -1f,
+//                    -1f,
+//                    -1f,
+//                    9f,
+//                    -1f,
+//                    -1f,
+//                    -1f,
+//                    -1f,
+//                ), 0f
+//            )
+//            setKernel(
+//                floatArrayOf(
+//                    -1f,
+//                    0f,
+//                    1f,
+//                    -2f,
+//                    0f,
+//                    2f,
+//                    -1f,
+//                    0f,
+//                    1f,
+//                ), 0f
+//            )
             setKernel(
                 floatArrayOf(
-                    1f / 16f,
-                    2f / 16f,
-                    1f / 16f,
-                    2f / 16f,
-                    4f / 16f,
-                    2f / 16f,
-                    1f / 16f,
-                    2f / 16f,
-                    1f / 16f
+                    -1f,
+                    -1f,
+                    -1f,
+                    -1f,
+                    8f,
+                    -1f,
+                    -1f,
+                    -1f,
+                    -1f,
                 ), 0.5f
             )
+//            setKernel(
+//                floatArrayOf(
+//                    2f,
+//                    0f,
+//                    0f,
+//                    0f,
+//                    -1f,
+//                    0f,
+//                    0f,
+//                    0f,
+//                    -1f
+//                ), 0.5f
+//            )
+//            setKernel(
+//                floatArrayOf(
+//                    -2f,
+//                    -1f,
+//                    0f,
+//                    -1f,
+//                    0f,
+//                    1f,
+//                    0f,
+//                    1f,
+//                    2f
+//                ), 0.5f
+//            )
             setTexSize(256, 256)
         }
 
