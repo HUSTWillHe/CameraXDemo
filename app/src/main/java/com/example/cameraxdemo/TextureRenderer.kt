@@ -28,9 +28,19 @@ class TextureRender {
                 "uniform samplerExternalOES uTexture;" +
                 "varying vec2 vTexCoord;" +
                 "void main() {" +
-//                "  gl_FragColor = vec4(1.0, 1.0, 0.0, 1.0);" +
-                "  gl_FragColor = texture2D(uTexture, vTexCoord);" +
+                "  vec4 tc = texture2D(uTexture, vTexCoord);" +
+                "  float color = tc.r * 0.3 + tc.g * 0.59 + tc.b * 0.11;" +
+                "  gl_FragColor = vec4(color, color, color, 1.0);" +
                 "}"
+
+//    private val fragmentShaderCode =
+//        "precision mediump float;" +
+//                "#extension GL_OES_EGL_image_external : require \n" +
+//                "uniform samplerExternalOES uTexture;" +
+//                "varying vec2 vTexCoord;" +
+//                "void main() {" +
+//                "  gl_FragColor = texture2D(uTexture, vTexCoord);" +
+//                "}"
 
     /*private val vertexData = floatArrayOf(
         -1.0f, 1.0f, 0.0f,  0.0f, 0.0f, //左上角

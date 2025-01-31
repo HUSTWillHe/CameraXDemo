@@ -242,7 +242,6 @@ class MainActivity : AppCompatActivity() {
 
         val manager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
-        // todo: 改回来
         var cameraId = manager.cameraIdList[1]
         val characteristics = manager.getCameraCharacteristics(cameraId)
         mSensorOrientation = characteristics[CameraCharacteristics.SENSOR_ORIENTATION]!!
