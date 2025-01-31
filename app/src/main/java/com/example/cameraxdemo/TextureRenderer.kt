@@ -10,6 +10,8 @@ import java.nio.ByteOrder
 import java.nio.FloatBuffer
 
 class TextureRender {
+    private val KERNEL_SIZE = 9
+
     //创建shader，并为其指定源码
     private val vertexShaderCode =
         "attribute vec4 aPosition;" +
@@ -22,15 +24,35 @@ class TextureRender {
                 "  vTexCoord = (aTexCoord).xy;" +
                 "}"
 
-    private val fragmentShaderCode =
+    private val fragmentShaderCodeWB =
         "precision mediump float;" +
-        "#extension GL_OES_EGL_image_external : require \n" +
+                "#extension GL_OES_EGL_image_external : require \n" +
                 "uniform samplerExternalOES uTexture;" +
                 "varying vec2 vTexCoord;" +
                 "void main() {" +
                 "  vec4 tc = texture2D(uTexture, vTexCoord);" +
                 "  float color = tc.r * 0.3 + tc.g * 0.59 + tc.b * 0.11;" +
                 "  gl_FragColor = vec4(color, color, color, 1.0);" +
+                "}"
+
+    private val fragmentShaderCode =
+        "#define KERNEL_SIZE ${KERNEL_SIZE} \n" +
+                "precision mediump float;" +
+                "#extension GL_OES_EGL_image_external : require \n" +
+                "uniform float uKernel[KERNEL_SIZE];" +
+                "uniform vec2 uTexOffset[KERNEL_SIZE];" +
+                "uniform float uColorOffset;" +
+                "uniform samplerExternalOES uTexture;" +
+                "varying vec2 vTexCoord;" +
+                "void main() {" +
+                "  int i = 0;" +
+                "  vec4 sum = vec4(0.0);" +
+                "  for (i = 0; i < KERNEL_SIZE; i++) {" +
+                "    vec4 tc = texture2D(uTexture, vTexCoord + uTexOffset[i]);" +
+                "    sum += tc * uKernel[i];" +
+                "  }" +
+                "  sum += uColorOffset;" +
+                "  gl_FragColor = sum;" +
                 "}"
 
 //    private val fragmentShaderCode =
@@ -52,8 +74,8 @@ class TextureRender {
     private val vertexData = floatArrayOf(
         -1.0f, -1.0f, 0.0f, 0.0f, 0.0f,  // 0 bottom left
         1.0f, -1.0f, 0.0f, 1.0f, 0.0f,   // 1 bottom right
-        -1.0f,  1.0f, 0.0f, 0.0f, 1.0f,  // 2 top left
-        1.0f,  1.0f, 0.0f, 1.0f, 1.0f    // 3 top right
+        -1.0f, 1.0f, 0.0f, 0.0f, 1.0f,  // 2 top left
+        1.0f, 1.0f, 0.0f, 1.0f, 1.0f    // 3 top right
     )
 
     private var vboId = IntArray(1)
@@ -65,8 +87,15 @@ class TextureRender {
     private var mSamplerHandle = -1
     private var mMVPMatrixHandle = -1
     private var mSTMatrixHandle = -1
+    private var mKernelHandle = -1
+    private var mTexOffsetHandle = -1
+    private var mColorOffsetHandle = -1
 
     private var mTextureId = -1
+
+    private val mKernel = FloatArray(KERNEL_SIZE)
+    private var mColorOffset = 0.0f
+    private lateinit var mTexOffset: FloatArray
 
     private var vertexBuffer: FloatBuffer = ByteBuffer.allocateDirect(vertexData.size * 4)
         .order(ByteOrder.nativeOrder()).asFloatBuffer()
@@ -74,7 +103,6 @@ class TextureRender {
     private var textureBuffer: FloatBuffer = ByteBuffer.allocateDirect(textureData.size * 4)
         .order(ByteOrder.nativeOrder()).asFloatBuffer()
     */
-
 
 
     constructor() {
@@ -104,7 +132,12 @@ class TextureRender {
 
         GLES30.glGenBuffers(1, vboId, 0)
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, vboId[0])
-        GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, vertexBuffer.capacity()*4, vertexBuffer, GLES30.GL_STATIC_DRAW)
+        GLES30.glBufferData(
+            GLES30.GL_ARRAY_BUFFER,
+            vertexBuffer.capacity() * 4,
+            vertexBuffer,
+            GLES30.GL_STATIC_DRAW
+        )
 
         /*
         GLES30.glGenBuffers(1, vboTextureId, 0)
@@ -121,8 +154,47 @@ class TextureRender {
         mSamplerHandle = GLES30.glGetUniformLocation(mProgram, "uTexture")
         mMVPMatrixHandle = GLES30.glGetUniformLocation(mProgram, "uMVPMatrix")
         mSTMatrixHandle = GLES30.glGetUniformLocation(mProgram, "uSTMatrix")
+        mKernelHandle = GLES30.glGetUniformLocation(mProgram, "uKernel")
+        if (mKernelHandle < 0) {
+            mTexOffsetHandle = -1;
+            mColorOffsetHandle = -1;
+            mKernelHandle = -1;
+        } else {
+            mTexOffsetHandle = GLES30.glGetUniformLocation(mProgram, "uTexOffset")
+            mColorOffsetHandle = GLES30.glGetUniformLocation(mProgram, "uColorOffset")
+            setKernel(
+                floatArrayOf(
+                    1f / 16f,
+                    2f / 16f,
+                    1f / 16f,
+                    2f / 16f,
+                    4f / 16f,
+                    2f / 16f,
+                    1f / 16f,
+                    2f / 16f,
+                    1f / 16f
+                ), 0.5f
+            )
+            setTexSize(256, 256)
+        }
 
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, 0)
+    }
+
+    fun setKernel(kernel: FloatArray, colorOffset: Float) {
+        System.arraycopy(kernel, 0, mKernel, 0, KERNEL_SIZE)
+        mColorOffset = colorOffset
+    }
+
+    fun setTexSize(width: Int, height: Int) {
+        val tw = 1.0f / width
+        val th = 1.0f / height
+
+        mTexOffset = floatArrayOf(
+            -tw, -th, 0f, -th, tw, -th,
+            -tw, 0f, 0f, 0f, tw, 0f,
+            -tw, th, 0f, th, tw, th
+        )
     }
 
     fun getTextureId(): Int {
@@ -152,14 +224,22 @@ class TextureRender {
         GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureIds[0])
 
 
-        GLES30.glTexParameterf(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_MIN_FILTER,
-            GLES30.GL_LINEAR.toFloat());
-        GLES30.glTexParameterf(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_MAG_FILTER,
-            GLES30.GL_LINEAR.toFloat());
-        GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_S,
-            GLES30.GL_CLAMP_TO_EDGE);
-        GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_T,
-            GLES30.GL_CLAMP_TO_EDGE);
+        GLES30.glTexParameterf(
+            GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_MIN_FILTER,
+            GLES30.GL_LINEAR.toFloat()
+        );
+        GLES30.glTexParameterf(
+            GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_MAG_FILTER,
+            GLES30.GL_LINEAR.toFloat()
+        );
+        GLES30.glTexParameteri(
+            GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_S,
+            GLES30.GL_CLAMP_TO_EDGE
+        );
+        GLES30.glTexParameteri(
+            GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_T,
+            GLES30.GL_CLAMP_TO_EDGE
+        );
         GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0)
 
         return textureIds[0]
@@ -171,10 +251,24 @@ class TextureRender {
 
         //将数据传递给shader
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, vboId[0])
-        GLES30.glVertexAttribPointer(mPositionHandle, 3, GLES30.GL_FLOAT, false, 5*Float.SIZE_BYTES, 0)
+        GLES30.glVertexAttribPointer(
+            mPositionHandle,
+            3,
+            GLES30.GL_FLOAT,
+            false,
+            5 * Float.SIZE_BYTES,
+            0
+        )
 
         //GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, vboTextureId[0])
-        GLES30.glVertexAttribPointer(mTextureHandle, 2, GLES30.GL_FLOAT, false, 5*Float.SIZE_BYTES, 3*Float.SIZE_BYTES)
+        GLES30.glVertexAttribPointer(
+            mTextureHandle,
+            2,
+            GLES30.GL_FLOAT,
+            false,
+            5 * Float.SIZE_BYTES,
+            3 * Float.SIZE_BYTES
+        )
 
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, mTextureId)
@@ -182,6 +276,12 @@ class TextureRender {
 
         GLES30.glUniformMatrix4fv(mMVPMatrixHandle, 1, false, mvpMatrix, 0)
         GLES30.glUniformMatrix4fv(mSTMatrixHandle, 1, false, stMaxtrix, 0)
+
+        if (mKernelHandle >= 0) {
+            GLES30.glUniform1fv(mKernelHandle, KERNEL_SIZE, mKernel, 0)
+            GLES30.glUniform2fv(mTexOffsetHandle, KERNEL_SIZE, mTexOffset, 0)
+            GLES30.glUniform1f(mColorOffsetHandle, mColorOffset)
+        }
 
         //drawArray, 绘制三角形
         GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
