@@ -5,50 +5,73 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
-import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
-import androidx.camera.core.ImageCapture
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import com.example.cameraxdemo.databinding.ActivityMainBinding
 import android.Manifest
-import android.content.ContentValues
-import android.provider.MediaStore
-import android.view.GestureDetector
-import android.view.MotionEvent
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageCaptureException
-import androidx.camera.core.ImageProxy
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
-import java.text.SimpleDateFormat
-import java.util.Locale
+import android.content.Context
+import android.graphics.SurfaceTexture
+import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraDevice
+import android.hardware.camera2.CameraManager
+import android.opengl.GLSurfaceView
+import android.os.Handler
+import android.os.Looper
+import android.os.Message
+import android.util.Size
+import android.view.Surface
+import com.example.glsurfaceviewdemo.MyGLRenderer
+import com.example.glsurfaceviewdemo.MyGLSurfaceView
+import kotlin.math.abs
 
 class MainActivity : AppCompatActivity() {
     private lateinit var viewBinding: ActivityMainBinding
-    private var imageCapture: ImageCapture? = null
-    private var cameraSelector: CameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+    private lateinit var mCamera: CameraDevice
+    private lateinit var mCamtureSession: CameraCaptureSession
+    private var mHandler: Handler? = null
+    private var mSurfaceTexture: SurfaceTexture? = null
+    private var mRenderer: MyGLRenderer? = null
+    private var mGLView: MyGLSurfaceView? = null
+    private var mPreviewSize: Size = Size(0, 0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        viewBinding = ActivityMainBinding.inflate(layoutInflater)
-        setContentView(viewBinding.root)
+        if (mGLView == null) {
+            mGLView = MyGLSurfaceView(this)
+
+            setContentView(mGLView)
+
+            mRenderer = mGLView?.getRender()
+
+            mGLView?.renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
+        }
+
+        if (mHandler == null) {
+            mHandler = object : Handler(Looper.getMainLooper()) {
+                override fun handleMessage(msg: Message) {
+                    super.handleMessage(msg)
+                    when (msg.what) {
+                        1 -> {
+                            val texture = msg.obj as SurfaceTexture
+                            mSurfaceTexture = texture
+
+                            captureVideo()
+                        }
+
+                        else -> {
+                            Log.w(TAG, "othres message: ${msg.what}")
+                        }
+                    }
+                }
+            }
+        }
 
         if (allPermissionGranted()) {
             startCamera()
         } else {
             ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSION)
-        }
-
-        viewBinding.imageCaptureButton.setOnClickListener { takePhoto() }
-        viewBinding.switchButton.setOnClickListener { switchCamera() }
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
-            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
-            insets
         }
     }
 
@@ -68,52 +91,78 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun startCamera() {
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
-        cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
-            val preview = Preview.Builder().build().also {
-                it.setSurfaceProvider(viewBinding.viewFinder.surfaceProvider)
-            }
-            imageCapture = ImageCapture.Builder().build()
+    private fun captureVideo() {
+        if (mCamera == null) return
+        if (mSurfaceTexture == null) return
 
-            try {
-                cameraProvider.unbindAll()
-                val camera = cameraProvider.bindToLifecycle(
-                    this,
-                    cameraSelector,
-                    preview,
-                    imageCapture
-                )
-                val cameraControl = camera.cameraControl
-                val cameraInfo = camera.cameraInfo
-//                cameraControl.enableTorch(true)
-                val gestureDetector =
-                    GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
-                        override fun onScroll(
-                            e1: MotionEvent?,
-                            e2: MotionEvent,
-                            distanceX: Float,
-                            distanceY: Float
-                        ): Boolean {
-//                            return super.onScroll(e1, e2, distanceX, distanceY)
-                            val curZoomRatio = cameraInfo.zoomState.value?.zoomRatio ?: 1f
-                            val delta = (e1?.y ?: 0f) - (e2.y ?: 0f)
-                            val scale = delta / viewBinding.viewFinder.height.toFloat()
-                            val zoomRatio = curZoomRatio + scale
-                            val maxZoomRatio = cameraInfo.zoomState.value?.maxZoomRatio ?: 1f
-                            cameraControl.setZoomRatio(zoomRatio.coerceIn(0f, maxZoomRatio))
-                            return true
-                        }
-                    })
-                viewBinding.viewFinder.setOnTouchListener { _, event ->
-                    gestureDetector.onTouchEvent(event)
-                    true
-                }
-            } catch (exec: Exception) {
-                Log.e(TAG, "Failed: ", exec)
+        Log.d(TAG, "set default buffer size: ${mPreviewSize.width}   ${mPreviewSize.height}")
+        mSurfaceTexture?.setDefaultBufferSize(mPreviewSize.width, mPreviewSize.height)
+        val surface = Surface(mSurfaceTexture)
+
+        val requestBuilder = mCamera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+        requestBuilder.addTarget(surface)
+
+        val output = listOf(surface)
+        mCamera.createCaptureSession(output, object : CameraCaptureSession.StateCallback() {
+            override fun onConfigured(session: CameraCaptureSession) {
+                mCamtureSession = session
+                session.setRepeatingRequest(requestBuilder!!.build(), null, null)
             }
-        }, ContextCompat.getMainExecutor(this))
+
+            override fun onConfigureFailed(session: CameraCaptureSession) {
+                //TODO("Not yet implemented")
+            }
+        }, null)
+    }
+
+    fun chooseBestSize(sizes: Array<Size>, width: Int, height: Int): Size {
+        var bestSize: Size = sizes[0]
+
+        var minDiffWidth = Int.MAX_VALUE
+        var minDiffHeight = Int.MAX_VALUE
+
+        for (size in sizes) {
+            val diffWidth = abs(size.width - width)
+            val diffHeight = abs(size.height - height)
+
+            val isAspectRatioValid =
+                abs(size.width.toFloat() / size.height - 4.0f / 3.0f) < 0.01f ||
+                        abs(size.width.toFloat() / size.height - 16.0f / 9.0f) < 0.01f
+            if (isAspectRatioValid && (diffWidth < minDiffWidth || (diffWidth == minDiffWidth && diffHeight < minDiffHeight))) {
+                bestSize = size
+                minDiffHeight = diffHeight
+                minDiffWidth = diffWidth
+            }
+        }
+        return bestSize
+    }
+
+    private fun startCamera() {
+        val manager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        val cameraId = manager.cameraIdList[0]
+        val characteristics = manager.getCameraCharacteristics(cameraId)
+        val map = characteristics[CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP]!!
+        mPreviewSize = chooseBestSize(map.getOutputSizes(SurfaceTexture::class.java), 1280, 720)
+        Log.d(TAG, "best size: ${mPreviewSize.width},  ${mPreviewSize.height}")
+
+        try {
+            manager.openCamera(cameraId, object : CameraDevice.StateCallback() {
+                override fun onOpened(camera: CameraDevice) {
+                    mCamera = camera
+                    mRenderer?.setHandler(mHandler)
+                }
+
+                override fun onDisconnected(camera: CameraDevice) {
+//                    TODO("Not yet implemented")
+                }
+
+                override fun onError(camera: CameraDevice, error: Int) {
+//                    TODO("Not yet implemented")
+                }
+            }, null)
+        } catch (se: SecurityException) {
+            Log.e(TAG, se.toString())
+        }
     }
 
     private fun allPermissionGranted(): Boolean {
@@ -125,46 +174,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun switchCamera() {
-        cameraSelector = if (cameraSelector == CameraSelector.DEFAULT_BACK_CAMERA) {
-            CameraSelector.DEFAULT_FRONT_CAMERA
-        } else {
-            CameraSelector.DEFAULT_BACK_CAMERA
-        }
-        startCamera()
-    }
-
-    private fun takePhoto() {
-        val imageCap = imageCapture ?: return
-        val name =
-            SimpleDateFormat(FILENAME_FORMAT, Locale.CHINA).format(System.currentTimeMillis())
-        val contentValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
-                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/CameraX-Image")
-            }
-        }
-        val outputOptions = ImageCapture.OutputFileOptions.Builder(
-            contentResolver,
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            contentValues
-        ).build()
-        imageCap.takePicture(
-            outputOptions,
-            ContextCompat.getMainExecutor(this),
-            object : ImageCapture.OnImageSavedCallback {
-                override fun onError(exception: ImageCaptureException) {
-                    Log.e(TAG, "Failed to capture photo. $exception", exception)
-                }
-
-                override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                    val msg = "Success to capture photo: ${outputFileResults.savedUri}"
-                    Toast.makeText(baseContext, msg, Toast.LENGTH_LONG).show()
-                    Log.d(TAG, msg)
-                }
-            })
-    }
 
     companion object {
         private const val TAG = "CameraXDemo"
