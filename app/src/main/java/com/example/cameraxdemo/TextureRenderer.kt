@@ -35,7 +35,7 @@ class TextureRender {
                 "  gl_FragColor = vec4(color, color, color, 1.0);" +
                 "}"
 
-    private val fragmentShaderCode =
+    private val fragmentShaderCodeFilter =
         "#define KERNEL_SIZE ${KERNEL_SIZE} \n" +
                 "precision mediump float;" +
                 "#extension GL_OES_EGL_image_external : require \n" +
@@ -53,6 +53,33 @@ class TextureRender {
                 "  }" +
                 "  sum += uColorOffset;" +
                 "  gl_FragColor = sum;" +
+                "}"
+
+    private val fragmentShaderCode =
+        "#define KERNEL_SIZE ${KERNEL_SIZE} \n" +
+                "precision mediump float;" +
+                "#extension GL_OES_EGL_image_external : require \n" +
+                "uniform float uKernel[KERNEL_SIZE];" +
+                "uniform vec2 uTexOffset[KERNEL_SIZE];" +
+                "uniform float uColorOffset;" +
+                "uniform samplerExternalOES uTexture;" +
+                "varying vec2 vTexCoord;" +
+                "void main() {" +
+                "  int i = 0;" +
+                "  vec4 sum = vec4(0.0);" +
+                "  for (i = 0; i < KERNEL_SIZE; i++) {" +
+                "    vec4 tc = texture2D(uTexture, vTexCoord + uTexOffset[i]);" +
+                "    sum += tc * uKernel[i];" +
+                "  }" +
+                "  sum += uColorOffset;" +
+                "  float gray = dot(sum.rgb, vec3(0.3, 0.59, 0.11));" +
+                "  float alpha = 0.0;" +
+                "  if (gl_FragCoord.x > 500.0) {" +
+                "    alpha = 1.0 - smoothstep(0.2, 0.8, gray);" +
+                "  } else {" +
+                "    alpha = 1.0 - gray;" +
+                "  }" +
+                "  gl_FragColor = mix(vec4(1.0), vec4(0.0, 0.0, 0.0, 1.0), alpha);" +
                 "}"
 
 //    private val fragmentShaderCode =
@@ -194,12 +221,12 @@ class TextureRender {
                     -1f,
                     -1f,
                     -1f,
-                    8f,
+                    9f,
                     -1f,
                     -1f,
                     -1f,
                     -1f,
-                ), 0.5f
+                ), 0f
             )
 //            setKernel(
 //                floatArrayOf(
