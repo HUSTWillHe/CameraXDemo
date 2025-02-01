@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Message
 import android.util.Log
 import android.util.Size
+import com.example.cameraxdemo.R
 
 class MyGLSurfaceView : GLSurfaceView {
     private lateinit var myGlRender: MyGLRenderer
@@ -22,7 +23,7 @@ class MyGLSurfaceView : GLSurfaceView {
         setEGLContextClientVersion(3)
 
         //为GLSurfaceView设置Renderer，在该函数中会启动一个新的线程来构造EGL环境
-        myGlRender = MyGLRenderer(this)
+        myGlRender = MyGLRenderer(this, context)
         setRenderer(myGlRender)
     }
 
@@ -35,13 +36,14 @@ class MyGLSurfaceView : GLSurfaceView {
     }
 }
 
-class MyGLRenderer(glView: MyGLSurfaceView) : GLSurfaceView.Renderer, SurfaceTexture.OnFrameAvailableListener {
+class MyGLRenderer(glView: MyGLSurfaceView, context: Context) : GLSurfaceView.Renderer, SurfaceTexture.OnFrameAvailableListener {
     private lateinit var mTextureRender: TextureRender
-//    private var mContext = context
+    private var mContext = context
 
     private var mGLView = glView
 
 //    private lateinit var bitmap: Bitmap
+    private lateinit var  lutBitmap: Bitmap
 
     private var mIWidth = 0
     private var mIHeight = 0
@@ -76,6 +78,7 @@ class MyGLRenderer(glView: MyGLSurfaceView) : GLSurfaceView.Renderer, SurfaceTex
 //        bitmap = loadImage()
 //        mIWidth = bitmap.width
 //        mIHeigth = bitmap.height
+        lutBitmap = loadLutImage()
     }
 
     fun setOrientation(degree: Int){
@@ -114,7 +117,7 @@ class MyGLRenderer(glView: MyGLSurfaceView) : GLSurfaceView.Renderer, SurfaceTex
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         //设置OpenGL ES清屏色为红色， R,G,B,A
         GLES30.glClearColor(1.0f, 0.0f, 0.0f, .8f)
-        mTextureRender = TextureRender()
+        mTextureRender = TextureRender(mContext, lutBitmap)
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -184,6 +187,12 @@ class MyGLRenderer(glView: MyGLSurfaceView) : GLSurfaceView.Renderer, SurfaceTex
 //        options.inScaled = false
 //        return BitmapFactory.decodeResource(mContext.resources, R.drawable.cub, options)
 //    }
+
+    private fun loadLutImage(): Bitmap {
+        val options  = BitmapFactory.Options()
+        options.inScaled = false
+        return BitmapFactory.decodeResource(mContext.resources, R.drawable.lut_c, options)
+    }
 
     override fun onDrawFrame(gl: GL10?) {
         //清空当前缓冲区的颜色缓冲区

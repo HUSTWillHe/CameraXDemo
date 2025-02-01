@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.opengl.GLES11Ext
 import android.opengl.GLES30
+import android.opengl.GLUtils
 import android.util.Log
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -55,7 +56,7 @@ class TextureRender {
                 "  gl_FragColor = sum;" +
                 "}"
 
-    private val fragmentShaderCode =
+    private val fragmentShaderCodeSketch =
         "#define KERNEL_SIZE ${KERNEL_SIZE} \n" +
                 "precision mediump float;" +
                 "#extension GL_OES_EGL_image_external : require \n" +
@@ -82,14 +83,33 @@ class TextureRender {
                 "  gl_FragColor = mix(vec4(1.0), vec4(0.0, 0.0, 0.0, 1.0), alpha);" +
                 "}"
 
-//    private val fragmentShaderCode =
-//        "precision mediump float;" +
-//                "#extension GL_OES_EGL_image_external : require \n" +
-//                "uniform samplerExternalOES uTexture;" +
-//                "varying vec2 vTexCoord;" +
-//                "void main() {" +
-//                "  gl_FragColor = texture2D(uTexture, vTexCoord);" +
-//                "}"
+    private val fragmentShaderCodeLut = """
+        precision mediump float;
+        #extension GL_OES_EGL_image_external : require 
+        uniform samplerExternalOES uTexture;
+        uniform sampler2D uLutSampler;
+        varying vec2 vTexCoord;
+        void main() {
+            vec4 texColor = texture2D(uTexture, vTexCoord);
+            float blueColor = texColor.b * 63.0;
+            vec2 quad1, quad2;
+            quad1.y = floor(floor(blueColor) / 8.0);
+            quad1.x = floor(blueColor) - (quad1.y * 8.0);
+            quad2.y = floor(ceil(blueColor) / 8.0);
+            quad2.x = ceil(blueColor) - (quad2.y * 8.0);
+            
+            vec2 texPos1, texPos2;
+            texPos1.x = (quad1.x * 0.125) + 0.5 / 512.0 + (0.125 - 1.0 / 512.0) * texColor.r;
+            texPos1.y = (quad1.y * 0.125) + 0.5 / 512.0 + (0.125 - 1.0 / 512.0) * texColor.g;
+            texPos2.x = (quad2.x * 0.125) + 0.5 / 512.0 + (0.125 - 1.0 / 512.0) * texColor.r;
+            texPos2.y = (quad2.y * 0.125) + 0.5 / 512.0 + (0.125 - 1.0 / 512.0) * texColor.g;
+            
+            vec4 newColor1 = texture2D(uLutSampler, texPos1);
+            vec4 newColor2 = texture2D(uLutSampler, texPos2);
+            
+            gl_FragColor = mix(newColor1, newColor2, fract(blueColor));
+        }
+    """
 
     /*private val vertexData = floatArrayOf(
         -1.0f, 1.0f, 0.0f,  0.0f, 0.0f, //左上角
@@ -108,10 +128,13 @@ class TextureRender {
     private var vboId = IntArray(1)
     private var vboTextureId = IntArray(1)
 
+    private lateinit var mContext: Context
+
     private var mProgram = -1
     private var mPositionHandle = -1
     private var mTextureHandle = -1
     private var mSamplerHandle = -1
+    private var mLutSamplerHandle = -1
     private var mMVPMatrixHandle = -1
     private var mSTMatrixHandle = -1
     private var mKernelHandle = -1
@@ -119,6 +142,7 @@ class TextureRender {
     private var mColorOffsetHandle = -1
 
     private var mTextureId = -1
+    private var mLutTextureId = -1
 
     private val mKernel = FloatArray(KERNEL_SIZE)
     private var mColorOffset = 0.0f
@@ -132,7 +156,9 @@ class TextureRender {
     */
 
 
-    constructor() {
+    constructor(context: Context, lutBitmap: Bitmap) {
+        mContext = context
+        mLutTextureId = uploadTexture(lutBitmap)
 
         vertexBuffer.put(vertexData).position(0)
         //textureBuffer.put(textureData).position(0)
@@ -143,7 +169,7 @@ class TextureRender {
         //Matrix.scaleM(translateMatrix, 0, 0.5f, 0.5f, 1.0f)
 
         val vertexShader = loadShader(GLES30.GL_VERTEX_SHADER, vertexShaderCode)
-        val fragmentShader = loadShader(GLES30.GL_FRAGMENT_SHADER, fragmentShaderCode)
+        val fragmentShader = loadShader(GLES30.GL_FRAGMENT_SHADER, fragmentShaderCodeLut)
 
         mProgram = GLES30.glCreateProgram()
         GLES30.glAttachShader(mProgram, vertexShader)
@@ -179,6 +205,7 @@ class TextureRender {
         GLES30.glEnableVertexAttribArray(mTextureHandle)
 
         mSamplerHandle = GLES30.glGetUniformLocation(mProgram, "uTexture")
+        mLutSamplerHandle = GLES30.glGetUniformLocation(mProgram, "uLutSampler")
         mMVPMatrixHandle = GLES30.glGetUniformLocation(mProgram, "uMVPMatrix")
         mSTMatrixHandle = GLES30.glGetUniformLocation(mProgram, "uSTMatrix")
         mKernelHandle = GLES30.glGetUniformLocation(mProgram, "uKernel")
@@ -324,6 +351,30 @@ class TextureRender {
         return textureIds[0]
     }
 
+    private fun uploadTexture(bitmap: Bitmap): Int {
+        val textureIds = IntArray(1)
+        GLES30.glGenTextures(1, textureIds, 0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, textureIds[0])
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+
+        GLES30.glTexParameteri(
+            GLES30.GL_TEXTURE_2D,
+            GLES30.GL_TEXTURE_WRAP_S,
+            GLES30.GL_CLAMP_TO_EDGE
+        )
+        GLES30.glTexParameteri(
+            GLES30.GL_TEXTURE_2D,
+            GLES30.GL_TEXTURE_WRAP_T,
+            GLES30.GL_CLAMP_TO_EDGE
+        )
+        GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, bitmap, 0)
+        bitmap.recycle()
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+
+        return textureIds[0]
+    }
+
     fun draw(mvpMatrix: FloatArray, stMaxtrix: FloatArray) {
         //使用program
         GLES30.glUseProgram(mProgram)
@@ -352,6 +403,12 @@ class TextureRender {
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, mTextureId)
         GLES30.glUniform1i(mSamplerHandle, 0)
+
+        if (mLutSamplerHandle >= 0) {
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, mLutTextureId)
+            GLES30.glUniform1i(mLutSamplerHandle, 1)
+        }
 
         GLES30.glUniformMatrix4fv(mMVPMatrixHandle, 1, false, mvpMatrix, 0)
         GLES30.glUniformMatrix4fv(mSTMatrixHandle, 1, false, stMaxtrix, 0)
